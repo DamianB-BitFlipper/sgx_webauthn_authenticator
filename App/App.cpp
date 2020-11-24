@@ -258,6 +258,34 @@ int32_t untrusted_load_enclave_data(uint8_t *sealed_data, const size_t sealed_si
   return 0;
 }
 
+uint32_t hex2buf(char data_to_sign[], uint8_t **ret) {  
+  if (!data_to_sign) {
+    return 0;
+  }
+
+  // Every two characters is a byte 
+  const uint32_t nchars_to_sign = strlen(data_to_sign);
+  
+  // Sanity check an even number of characters to sign
+  if (nchars_to_sign % 2) {
+    return 0;
+  }
+
+  const char *pos = data_to_sign;
+
+  const uint32_t ret_size = nchars_to_sign / 2;
+  *ret = (uint8_t*)malloc(ret_size);
+
+  /* WARNING: no sanitization or error-checking whatsoever */
+  size_t count;
+  for (count = 0; count < ret_size; count++) {
+    sscanf(pos, "%2hhx", *ret + count);
+    pos += 2;
+  }
+
+  return ret_size;
+}
+
 /* Application entry */
 int SGX_CDECL main(int argc, char *argv[])
 {
@@ -266,64 +294,89 @@ int SGX_CDECL main(int argc, char *argv[])
 
     /* Initialize the enclave */
     if(initialize_enclave() < 0) {
+        printf("Failed to initialize enclave!\n");
         printf("Enter a character before exit ...\n");
         getchar();
         return -1; 
     }
  
     sgx_status_t status;
-    uint32_t i;
+    int32_t i;
 
     sgx_ec256_public_t pk;
     get_public_key(global_eid, &status, &pk);
 
     if (status) {
-      printf("App Error: %d\n", status);
-      return 1;
+      printf("App Error: %d!\n", status);
+      return -1;
     }
 
     // Print the public key
     printf("Public Key:\n");
 
-
-
+    // Reverse order because SGX stores it in little-endian and
+    // python reads it as a human (big-endian) integer
     printf("gx: ");
-    for (i = 0; i < SGX_ECP256_KEY_SIZE; i++) {
+    for (i = SGX_ECP256_KEY_SIZE - 1; i >= 0; i--) {
       printf("%02x", pk.gx[i]);
     }
     printf("\n");
 
     printf("gy: ");
-    for (i = 0; i < SGX_ECP256_KEY_SIZE; i++) {
+    for (i = SGX_ECP256_KEY_SIZE - 1; i >= 0; i--) {
       printf("%02x", pk.gy[i]);
     }
     printf("\n");
 
-    // Ensure a spacing
+
+    // Ensure some spacing
     printf("\n\n");
 
+
     // Get user input as to what to sign
-    const uint32_t data_to_sign_size = 64;
+    const uint32_t data_to_sign_size = 256;
     char data_to_sign[data_to_sign_size];
 
-    printf("Enter text to sign:\n");
+    printf("Enter hex data to sign:\n");
     fgets(data_to_sign, data_to_sign_size, stdin);
+
+    // The `fgets` may add a newline at the end of the input, trim that
+    const uint32_t data_to_sign_len = strlen(data_to_sign) - 1;
+    if (data_to_sign[data_to_sign_len] == '\n') {
+      data_to_sign[data_to_sign_len] = '\0';
+    }
 
     printf("Signature for %s\n", data_to_sign);
 
-    sgx_ec256_signature_t signature;
-    sign_data(global_eid, &status, (uint8_t*)data_to_sign, 
-              sizeof(data_to_sign) / sizeof(data_to_sign[0]),
-              &signature);
+    uint8_t *bytes_to_sign;
+    const uint32_t nbytes_to_sign = hex2buf(data_to_sign, &bytes_to_sign);
 
-    printf("x: ");
-    for (i = 0; i < SGX_NISTP_ECP256_KEY_SIZE; i++) {
+    // Error check
+    if (!nbytes_to_sign) {
+      printf("Error receiving data to sign!\n");
+      return -1;
+    }
+
+    sgx_ec256_signature_t signature;
+    sign_data(global_eid, &status, bytes_to_sign, 
+              nbytes_to_sign, &signature);
+
+    // Release the `bytes_to_sign`
+    free(bytes_to_sign);
+
+    // Print the x and y coordinates of the signature
+    printf("signature: ");
+
+    // Reverse order because SGX stores it in little-endian and
+    // python reads it as a human (big-endian) integer
+    for (i = SGX_NISTP_ECP256_KEY_SIZE - 1; i >= 0; i--) {
       printf("%08x", signature.x[i]);
     }
-    printf("\n");
 
-    printf("y: ");
-    for (i = 0; i < SGX_NISTP_ECP256_KEY_SIZE; i++) {
+    // Comma separate the x and y coordinates
+    printf(",");
+
+    for (i = SGX_NISTP_ECP256_KEY_SIZE - 1; i >= 0; i--) {
       printf("%08x", signature.y[i]);
     }
     printf("\n");    
