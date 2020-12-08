@@ -220,9 +220,26 @@ sgx_status_t webauthn_get_signature(const uint8_t *data, uint32_t data_size,
   // Mark the end of the authentication text before printing it
   *auth_text_end = 0;
 
-  printf("Authentication text: %s\n", auth_text_start);
+  printf("\nAuthentication text: %s\n", auth_text_start);
+  printf("Accept [yes], Reject [no]:\n");
 
-  // TODO: Ask for user input
+  // Get the user input to this authentication request
+  char user_input[4];
+  untrusted_get_user_input(user_input, sizeof(user_input));
+  printf("\n");
 
-  return sign_data(data, data_size, ret_signature);
+  if (strcmp(user_input, "yes") == 0) {
+    printf("Authentication accepted\n");
+    return sign_data(data, data_size, ret_signature);    
+  } else if (strcmp(user_input, "no") == 0) {
+    printf("Authentication rejected\n");
+    return SGX_SUCCESS;
+  } else {
+    printf("Unknown input received\n");
+    return SGX_ERROR_UNEXPECTED;
+  }
+
+  // We should never get here
+  assert(false);
+  return SGX_ERROR_UNEXPECTED;
 }

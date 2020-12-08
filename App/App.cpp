@@ -47,10 +47,12 @@
 
 using namespace std;
 
+// Function declarations
+void fgets_nonewline(char *str, size_t n, FILE *stream);
+
 
 #define MAX_PATH FILENAME_MAX
 #define ENCLAVE_DATA_FILE "enclave_data.seal"
-
 
 /* Global EID shared by multiple threads */
 sgx_enclave_id_t global_eid = 0;
@@ -229,12 +231,18 @@ int initialize_enclave(void)
 }
 
 /* OCall untrusted functions */
-void untrusted_print_string(const char *str)
-{
+void untrusted_print_string(const char *str) {
     /* Proxy/Bridge will check the length and null-terminate 
      * the input string to prevent buffer overflow. 
      */
     printf("%s", str);
+
+    return;
+}
+
+void untrusted_get_user_input(char *ret_str, size_t n) {
+  fgets_nonewline(ret_str, n, stdin);
+  return;
 }
 
 int32_t untrusted_save_enclave_data(const uint8_t *sealed_data, const size_t sealed_size) {
@@ -284,6 +292,20 @@ uint32_t hex2buf(char data_to_sign[], uint8_t **ret) {
   }
 
   return ret_size;
+}
+
+// Perform an `fgets`, but trim the `\n` that gets added to the end
+// when the user hits the return key to submit their response
+void fgets_nonewline(char *str, size_t n, FILE *stream) {
+    fgets(str, n, stream);
+
+    // The `fgets` may add a newline at the end of the input, trim that
+    const uint32_t str_len = strlen(str) - 1;
+    if (str[str_len] == '\n') {
+      str[str_len] = '\0';
+    }
+  
+    return;
 }
 
 /* Application entry */
@@ -338,28 +360,16 @@ int SGX_CDECL main(int argc, char *argv[])
     char client_data_json[client_data_json_size];
 
     printf("Enter client JSON data:\n");
-    fgets(client_data_json, client_data_json_size, stdin);
-
-    // The `fgets` may add a newline at the end of the input, trim that
-    const uint32_t client_data_json_len = strlen(client_data_json) - 1;
-    if (client_data_json[client_data_json_len] == '\n') {
-      client_data_json[client_data_json_len] = '\0';
-    }
+    fgets_nonewline(client_data_json, client_data_json_size, stdin);
+    printf("\n");
 
     // Get user input as to what to sign
     const uint32_t data_to_sign_size = 256;
     char data_to_sign[data_to_sign_size];
 
     printf("Enter hex data to sign:\n");
-    fgets(data_to_sign, data_to_sign_size, stdin);
-
-    // The `fgets` may add a newline at the end of the input, trim that
-    const uint32_t data_to_sign_len = strlen(data_to_sign) - 1;
-    if (data_to_sign[data_to_sign_len] == '\n') {
-      data_to_sign[data_to_sign_len] = '\0';
-    }
-
-    printf("Signature for %s\n", data_to_sign);
+    fgets_nonewline(data_to_sign, data_to_sign_size, stdin);
+    printf("\n");
 
     // Decode the input into a byte array
     uint8_t *bytes_to_sign;
@@ -380,8 +390,14 @@ int SGX_CDECL main(int argc, char *argv[])
     // Release the input bytes decoded arrays
     free(bytes_to_sign);
 
+    // Check for errors
+    if (status) {
+      printf("Signature Error: %d!\n", status);
+      return -1;
+    }
+
     // Print the x and y coordinates of the signature
-    printf("signature: ");
+    printf("Resulting signature: ");
 
     // Reverse order because SGX stores it in little-endian and
     // python reads it as a human (big-endian) integer

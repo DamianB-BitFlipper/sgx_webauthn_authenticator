@@ -45,7 +45,8 @@ enclave {
 
     // Define OCALLS
     untrusted {
-        void untrusted_print_string([in, string] const char *str);
+        void untrusted_print_string([in, string]const char *str);
+        void untrusted_get_user_input([out, count=n]char *ret_str, size_t n);
         int32_t untrusted_save_enclave_data([in, count=sealed_size]const uint8_t *sealed_data, size_t sealed_size);
         int32_t untrusted_load_enclave_data([out, count=sealed_size]uint8_t *sealed_data, size_t sealed_size);
     };
