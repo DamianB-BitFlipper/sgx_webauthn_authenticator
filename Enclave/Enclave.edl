@@ -36,15 +36,22 @@ enclave {
     
     // Define ECALLS
     trusted {
-        public sgx_status_t get_public_key([out]sgx_ec256_public_t *ret_pk);
+        // TODO: Make RSA ret count a constant variable
+        public sgx_status_t get_public_keys([out]sgx_ec256_public_t *ret_ec256_pk, 
+                                            [out, count=256]uint8_t *ret_n, [out, count=2]uint8_t *ret_e);
         public sgx_status_t sign_data([in, count=data_size]const uint8_t *data, uint32_t data_size, [out]sgx_ec256_signature_t *ret_signature);
+        public sgx_status_t webauthn_get_signature([in, count=data_size]const uint8_t *data, uint32_t data_size,
+                                                   [in, count=client_data_size]const uint8_t *client_data, uint32_t client_data_size,
+                                                   [out]sgx_ec256_signature_t *ret_signature);
+
     };
 
     // Define OCALLS
     untrusted {
         void untrusted_print_string([in, string] const char *str);
-        int32_t untrusted_save_enclave_data([in, count=sealed_size]const uint8_t *sealed_data, size_t sealed_size);
-        int32_t untrusted_load_enclave_data([out, count=sealed_size]uint8_t *sealed_data, size_t sealed_size);
+        // TODO: Make `data_file` count a constant variable
+        int32_t untrusted_save_enclave_data([in, count=64]const char *data_file, [in, count=sealed_size]const uint8_t *sealed_data, size_t sealed_size);
+        int32_t untrusted_load_enclave_data([in, count=64]const char *data_file, [out, count=sealed_size]uint8_t *sealed_data, size_t sealed_size);
     };
 
 };

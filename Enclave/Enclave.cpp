@@ -34,6 +34,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>      /* vsnprintf */
+#include <string.h>
 
 #include "Enclave.h"
 #include "Enclave_t.h"  /* print_string */
@@ -42,13 +43,33 @@
 #include "sgx_tcrypto.h"
 #include "sgx_tseal.h"
 
+#define EC256_DATA_FILE "ec256_data.seal"
+#define RSA_DATA_FILE   "rsa_data.seal"
+
 typedef struct {
   sgx_ec256_public_t pk;
   sgx_ec256_private_t sk;
 } ec256_pk_sk_pair;
 
+
+const uint32_t RSA_N_SIZE = 256;
+const uint32_t RSA_E_SIZE = 2;
+
+typedef struct {  
+  uint8_t p_n[RSA_N_SIZE];
+  uint8_t p_d[256];
+  uint8_t p_e[RSA_E_SIZE];
+  uint8_t p_p[256];
+  uint8_t p_q[256];
+  uint8_t p_dmp1[256];
+  uint8_t p_dmq1[256];
+  uint8_t p_iqmp[256];
+} rsa_pk_sk_pair;
+
+
 // Function Declarations
-static sgx_status_t get_pk_sk_pair(ec256_pk_sk_pair *pk_sk_pair);
+static sgx_status_t get_ec256_pk_sk_pair(ec256_pk_sk_pair *pk_sk_pair);
+static sgx_status_t get_rsa_pk_sk_pair(rsa_pk_sk_pair *pk_sk_pair);
 
 /* 
  * printf: 
@@ -63,13 +84,31 @@ void printf(const char *fmt, ...) {
   untrusted_print_string(buf);
 }
 
-sgx_status_t get_public_key(sgx_ec256_public_t *ret_pk) {
-  ec256_pk_sk_pair pk_sk_pair;
-  sgx_status_t status = get_pk_sk_pair(&pk_sk_pair);
+sgx_status_t get_public_keys(sgx_ec256_public_t *ret_ec256_pk, 
+                             uint8_t *ret_n, uint8_t *ret_e) {
+  sgx_status_t status;
 
-  // No errors, copy the public key over
+  ec256_pk_sk_pair ec256_pk_sk;
+  rsa_pk_sk_pair rsa_pk_sk;
+
+  status = get_ec256_pk_sk_pair(&ec256_pk_sk);
+
+  if (status) {
+    return status;
+  }
+
+  status = get_rsa_pk_sk_pair(&rsa_pk_sk);
+
+  if (status) {
+    return status;
+  }
+
+  // No errors, copy the public keys over
   if (!status) {
-    *ret_pk = pk_sk_pair.pk;
+    *ret_ec256_pk = ec256_pk_sk.pk;
+
+    memcpy(ret_n, rsa_pk_sk.p_n, RSA_N_SIZE);
+    memcpy(ret_e, rsa_pk_sk.p_e, RSA_E_SIZE);
   }
 
   return status;
@@ -78,7 +117,7 @@ sgx_status_t get_public_key(sgx_ec256_public_t *ret_pk) {
 // TODO: All of these frees can be cleaned up. Split
 // the case where a new key needs to be created
 // into a helper function, and so forth
-static sgx_status_t get_pk_sk_pair(ec256_pk_sk_pair *pk_sk_pair) {
+static sgx_status_t get_ec256_pk_sk_pair(ec256_pk_sk_pair *pk_sk_pair) {
   sgx_status_t status;
 
   const size_t pk_sk_pair_size = sizeof(*pk_sk_pair);
@@ -87,7 +126,7 @@ static sgx_status_t get_pk_sk_pair(ec256_pk_sk_pair *pk_sk_pair) {
   size_t sealed_size = sgx_calc_sealed_data_size(0, pk_sk_pair_size);
   uint8_t *sealed_data = (uint8_t*)malloc(sealed_size);
 
-  untrusted_load_enclave_data(&error, sealed_data, sealed_size);
+  untrusted_load_enclave_data(&error, EC256_DATA_FILE, sealed_data, sealed_size);
 
   // Private key does not exist, create one and save it!
   if (error) {
@@ -118,7 +157,7 @@ static sgx_status_t get_pk_sk_pair(ec256_pk_sk_pair *pk_sk_pair) {
     }
 
     // Write back the sealed_data
-    untrusted_save_enclave_data(&error, sealed_data, sealed_size);
+    untrusted_save_enclave_data(&error, EC256_DATA_FILE, sealed_data, sealed_size);
 
     if (error) {
       status = SGX_ERROR_UNEXPECTED;
@@ -134,14 +173,66 @@ static sgx_status_t get_pk_sk_pair(ec256_pk_sk_pair *pk_sk_pair) {
   // Load the public/private keys from the sealed_data
   status = sgx_unseal_data((sgx_sealed_data_t*)sealed_data, NULL, NULL, (uint8_t*)pk_sk_pair, (uint32_t*)&pk_sk_pair_size);
 
-  if (status) {
+  free(sealed_data);
+  return status;
+}
+
+static sgx_status_t get_rsa_pk_sk_pair(rsa_pk_sk_pair *pk_sk_pair) {
+  sgx_status_t status;
+
+  const size_t pk_sk_pair_size = sizeof(*pk_sk_pair);
+
+  int32_t error;
+  size_t sealed_size = sgx_calc_sealed_data_size(0, pk_sk_pair_size);
+  uint8_t *sealed_data = (uint8_t*)malloc(sealed_size);
+
+  untrusted_load_enclave_data(&error, RSA_DATA_FILE, sealed_data, sealed_size);
+
+  // Private key does not exist, create one and save it!
+  if (error) {
+    status = sgx_create_rsa_key_pair(RSA_N_SIZE, RSA_E_SIZE, 
+                                     pk_sk_pair->p_n, 
+                                     pk_sk_pair->p_d,
+                                     pk_sk_pair->p_e,
+                                     pk_sk_pair->p_p,
+                                     pk_sk_pair->p_q,
+                                     pk_sk_pair->p_dmp1,
+                                     pk_sk_pair->p_dmq1,
+                                     pk_sk_pair->p_iqmp);
+    if (status) {
+      free(sealed_data);
+      return status;
+    }
+
+    // Seal the new public/private keys
+    status = sgx_seal_data(0, NULL, pk_sk_pair_size, (const uint8_t*)pk_sk_pair, 
+                           sealed_size,  (sgx_sealed_data_t*)sealed_data);
+
+    if (status) {
+      free(sealed_data);
+      return status;
+    }
+
+    // Write back the sealed_data
+    untrusted_save_enclave_data(&error, RSA_DATA_FILE, sealed_data, sealed_size);
+
+    if (error) {
+      status = SGX_ERROR_UNEXPECTED;
+    } else {
+      status = SGX_SUCCESS;
+    }
+
     free(sealed_data);
     return status;
-  }  
+  }
+
+  // Load the public/private keys from the sealed_data
+  status = sgx_unseal_data((sgx_sealed_data_t*)sealed_data, NULL, NULL, (uint8_t*)pk_sk_pair, (uint32_t*)&pk_sk_pair_size);
 
   free(sealed_data);
   return status;
 }
+
 
 sgx_status_t sign_data(const uint8_t *data, uint32_t data_size, sgx_ec256_signature_t *ret_signature) {
   sgx_status_t status;
@@ -157,7 +248,7 @@ sgx_status_t sign_data(const uint8_t *data, uint32_t data_size, sgx_ec256_signat
 
   // Get the private key from the enclave
   ec256_pk_sk_pair pk_sk_pair;
-  status = get_pk_sk_pair(&pk_sk_pair);
+  status = get_ec256_pk_sk_pair(&pk_sk_pair);
 
   if (status) {
     sgx_ecc256_close_context(handle);
@@ -178,4 +269,50 @@ sgx_status_t sign_data(const uint8_t *data, uint32_t data_size, sgx_ec256_signat
 
   sgx_ecc256_close_context(handle);
   return status;
+}
+
+// Compute the signature of a given piece of `data` according 
+// to the webauthn specification and input `client_data_json`
+sgx_status_t webauthn_get_signature(const uint8_t *data, uint32_t data_size,
+                                    const uint8_t *client_data_json, uint32_t client_data_json_size,
+                                    sgx_ec256_signature_t *ret_signature) {
+  // Expected `data_size` for the signature is 69 bytes
+  // (two hashes x 32 bytes + 5 bytes metadata)
+  if (data_size != 69) {
+    return SGX_ERROR_UNEXPECTED;
+  }
+
+  // TODO: Perform SHA256 on `client_data_json` and compare with 2nd half of `data`
+
+  // TODO: This is hacky and bug-prone
+  //
+  // Search the client data to see if this a txAuthSimple event
+  // Look for the string `"clientExtensions":{"txAuthSimple":` to get the transaction text
+  const char *txAuthSimple_search_text = "\"clientExtensions\":{\"txAuthSimple\":";
+  char *auth_text_start = strstr((const char*)client_data_json, txAuthSimple_search_text);
+  
+  // This must be a regular authentication event, simply sign
+  if (auth_text_start == NULL) {
+    return sign_data(data, data_size, ret_signature);
+  }
+
+  // Skip forward the search text in the authentication text start
+  auth_text_start += strlen(txAuthSimple_search_text);
+
+  // Look for the end of the authentication text
+  char *auth_text_end = strstr(auth_text_start, "}");
+
+  // Expect a closing bracket
+  if (auth_text_end == NULL) {
+    return SGX_ERROR_UNEXPECTED;
+  }
+
+  // Mark the end of the authentication text before printing it
+  *auth_text_end = 0;
+
+  printf("Authentication text: %s\n", auth_text_start);
+
+  // TODO: Ask for user input
+
+  return sign_data(data, data_size, ret_signature);
 }

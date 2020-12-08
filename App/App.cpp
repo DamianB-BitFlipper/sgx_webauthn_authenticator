@@ -49,8 +49,14 @@ using namespace std;
 
 
 #define MAX_PATH FILENAME_MAX
-#define ENCLAVE_DATA_FILE "enclave_data.seal"
 
+const uint32_t RSA_N_SIZE = 256;
+const uint32_t RSA_E_SIZE = 2;
+
+typedef struct {  
+  uint8_t p_n[RSA_N_SIZE];
+  uint8_t p_e[RSA_E_SIZE];
+} rsa_pk;
 
 /* Global EID shared by multiple threads */
 sgx_enclave_id_t global_eid = 0;
@@ -237,8 +243,9 @@ void untrusted_print_string(const char *str)
     printf("%s", str);
 }
 
-int32_t untrusted_save_enclave_data(const uint8_t *sealed_data, const size_t sealed_size) {
-  ofstream file(ENCLAVE_DATA_FILE, ios::out | ios::binary);
+int32_t untrusted_save_enclave_data(const char *data_file, const uint8_t *sealed_data, 
+                                    const size_t sealed_size) {
+  ofstream file(data_file, ios::out | ios::binary);
   if (file.fail()) {
     return 1;
   }
@@ -248,8 +255,9 @@ int32_t untrusted_save_enclave_data(const uint8_t *sealed_data, const size_t sea
   return 0;
 }
 
-int32_t untrusted_load_enclave_data(uint8_t *sealed_data, const size_t sealed_size) {
-  ifstream file(ENCLAVE_DATA_FILE, ios::in | ios::binary);
+int32_t untrusted_load_enclave_data(const char *data_file, uint8_t *sealed_data, 
+                                    const size_t sealed_size) {
+  ifstream file(data_file, ios::in | ios::binary);
   if (file.fail()) {
     return 1;
   }
@@ -299,32 +307,54 @@ int SGX_CDECL main(int argc, char *argv[])
         getchar();
         return -1; 
     }
- 
+
     sgx_status_t status;
     int32_t i;
 
-    sgx_ec256_public_t pk;
-    get_public_key(global_eid, &status, &pk);
+    
+
+    sgx_ec256_public_t ec256_pk;
+    rsa_pk rsa_pk;
+    get_public_keys(global_eid, &status, &ec256_pk, 
+                    rsa_pk.p_n, rsa_pk.p_e);
 
     if (status) {
       printf("App Error: %d!\n", status);
       return -1;
     }
 
-    // Print the public key
-    printf("Public Key:\n");
+    // Print the ec256 public key
+    printf("EC256 Public Key:\n");
 
     // Reverse order because SGX stores it in little-endian and
     // python reads it as a human (big-endian) integer
     printf("gx: ");
     for (i = SGX_ECP256_KEY_SIZE - 1; i >= 0; i--) {
-      printf("%02x", pk.gx[i]);
+      printf("%02x", ec256_pk.gx[i]);
     }
     printf("\n");
 
     printf("gy: ");
     for (i = SGX_ECP256_KEY_SIZE - 1; i >= 0; i--) {
-      printf("%02x", pk.gy[i]);
+      printf("%02x", ec256_pk.gy[i]);
+    }
+    printf("\n");
+
+
+    // Print the RSA public key
+    printf("RSA Public Key:\n");
+
+    // Reverse order because SGX stores it in little-endian and
+    // python reads it as a human (big-endian) integer
+    printf("n: ");
+    for (i = RSA_N_SIZE - 1; i >= 0; i--) {
+      printf("%02x", rsa_pk.p_n[i]);
+    }
+    printf("\n");
+
+    printf("e: ");
+    for (i = RSA_E_SIZE - 1; i >= 0; i--) {
+      printf("%02x", rsa_pk.p_e[i]);
     }
     printf("\n");
 
@@ -332,6 +362,19 @@ int SGX_CDECL main(int argc, char *argv[])
     // Ensure some spacing
     printf("\n\n");
 
+
+    // Get the client data for this attestation request
+    const uint32_t client_data_json_size = 1024;
+    char client_data_json[client_data_json_size];
+
+    printf("Enter client JSON data:\n");
+    fgets(client_data_json, client_data_json_size, stdin);
+
+    // The `fgets` may add a newline at the end of the input, trim that
+    const uint32_t client_data_json_len = strlen(client_data_json) - 1;
+    if (client_data_json[client_data_json_len] == '\n') {
+      client_data_json[client_data_json_len] = '\0';
+    }
 
     // Get user input as to what to sign
     const uint32_t data_to_sign_size = 256;
@@ -348,6 +391,7 @@ int SGX_CDECL main(int argc, char *argv[])
 
     printf("Signature for %s\n", data_to_sign);
 
+    // Decode the input into a byte array
     uint8_t *bytes_to_sign;
     const uint32_t nbytes_to_sign = hex2buf(data_to_sign, &bytes_to_sign);
 
@@ -358,10 +402,12 @@ int SGX_CDECL main(int argc, char *argv[])
     }
 
     sgx_ec256_signature_t signature;
-    sign_data(global_eid, &status, bytes_to_sign, 
-              nbytes_to_sign, &signature);
+    webauthn_get_signature(global_eid, &status, 
+                           bytes_to_sign, nbytes_to_sign,
+                           (const uint8_t*)client_data_json, client_data_json_size,
+                           &signature);
 
-    // Release the `bytes_to_sign`
+    // Release the input bytes decoded arrays
     free(bytes_to_sign);
 
     // Print the x and y coordinates of the signature

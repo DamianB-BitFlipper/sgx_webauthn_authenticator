@@ -23,15 +23,16 @@ void SGX_UBRIDGE(SGX_NOCONVENTION, untrusted_print_string, (const char* str));
 #endif
 #ifndef UNTRUSTED_SAVE_ENCLAVE_DATA_DEFINED__
 #define UNTRUSTED_SAVE_ENCLAVE_DATA_DEFINED__
-int32_t SGX_UBRIDGE(SGX_NOCONVENTION, untrusted_save_enclave_data, (const uint8_t* sealed_data, size_t sealed_size));
+int32_t SGX_UBRIDGE(SGX_NOCONVENTION, untrusted_save_enclave_data, (const char* data_file, const uint8_t* sealed_data, size_t sealed_size));
 #endif
 #ifndef UNTRUSTED_LOAD_ENCLAVE_DATA_DEFINED__
 #define UNTRUSTED_LOAD_ENCLAVE_DATA_DEFINED__
-int32_t SGX_UBRIDGE(SGX_NOCONVENTION, untrusted_load_enclave_data, (uint8_t* sealed_data, size_t sealed_size));
+int32_t SGX_UBRIDGE(SGX_NOCONVENTION, untrusted_load_enclave_data, (const char* data_file, uint8_t* sealed_data, size_t sealed_size));
 #endif
 
-sgx_status_t get_public_key(sgx_enclave_id_t eid, sgx_status_t* retval, sgx_ec256_public_t* ret_pk);
+sgx_status_t get_public_keys(sgx_enclave_id_t eid, sgx_status_t* retval, sgx_ec256_public_t* ret_ec256_pk, uint8_t* ret_n, uint8_t* ret_e);
 sgx_status_t sign_data(sgx_enclave_id_t eid, sgx_status_t* retval, const uint8_t* data, uint32_t data_size, sgx_ec256_signature_t* ret_signature);
+sgx_status_t webauthn_get_signature(sgx_enclave_id_t eid, sgx_status_t* retval, const uint8_t* data, uint32_t data_size, const uint8_t* client_data, uint32_t client_data_size, sgx_ec256_signature_t* ret_signature);
 
 #ifdef __cplusplus
 }
