@@ -3,3 +3,4 @@ app
 *.o
 .config_HW_DEBUG_x64
 enclave_data.seal
+\#*

@@ -333,6 +333,19 @@ int SGX_CDECL main(int argc, char *argv[])
     printf("\n\n");
 
 
+    // Get the client data for this attestation request
+    const uint32_t client_data_json_size = 1024;
+    char client_data_json[client_data_json_size];
+
+    printf("Enter client JSON data:\n");
+    fgets(client_data_json, client_data_json_size, stdin);
+
+    // The `fgets` may add a newline at the end of the input, trim that
+    const uint32_t client_data_json_len = strlen(client_data_json) - 1;
+    if (client_data_json[client_data_json_len] == '\n') {
+      client_data_json[client_data_json_len] = '\0';
+    }
+
     // Get user input as to what to sign
     const uint32_t data_to_sign_size = 256;
     char data_to_sign[data_to_sign_size];
@@ -348,6 +361,7 @@ int SGX_CDECL main(int argc, char *argv[])
 
     printf("Signature for %s\n", data_to_sign);
 
+    // Decode the input into a byte array
     uint8_t *bytes_to_sign;
     const uint32_t nbytes_to_sign = hex2buf(data_to_sign, &bytes_to_sign);
 
@@ -358,10 +372,12 @@ int SGX_CDECL main(int argc, char *argv[])
     }
 
     sgx_ec256_signature_t signature;
-    sign_data(global_eid, &status, bytes_to_sign, 
-              nbytes_to_sign, &signature);
+    webauthn_get_signature(global_eid, &status, 
+                           bytes_to_sign, nbytes_to_sign,
+                           (const uint8_t*)client_data_json, client_data_json_size,
+                           &signature);
 
-    // Release the `bytes_to_sign`
+    // Release the input bytes decoded arrays
     free(bytes_to_sign);
 
     // Print the x and y coordinates of the signature

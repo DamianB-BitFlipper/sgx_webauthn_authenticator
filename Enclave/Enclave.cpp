@@ -34,6 +34,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>      /* vsnprintf */
+#include <string.h>
 
 #include "Enclave.h"
 #include "Enclave_t.h"  /* print_string */
@@ -178,4 +179,50 @@ sgx_status_t sign_data(const uint8_t *data, uint32_t data_size, sgx_ec256_signat
 
   sgx_ecc256_close_context(handle);
   return status;
+}
+
+// Compute the signature of a given piece of `data` according 
+// to the webauthn specification and input `client_data_json`
+sgx_status_t webauthn_get_signature(const uint8_t *data, uint32_t data_size,
+                                    const uint8_t *client_data_json, uint32_t client_data_json_size,
+                                    sgx_ec256_signature_t *ret_signature) {
+  // Expected `data_size` for the signature is 69 bytes
+  // (two hashes x 32 bytes + 5 bytes metadata)
+  if (data_size != 69) {
+    return SGX_ERROR_UNEXPECTED;
+  }
+
+  // TODO: Perform SHA256 on `client_data_json` and compare with 2nd half of `data`
+
+  // TODO: This is hacky and bug-prone
+  //
+  // Search the client data to see if this a txAuthSimple event
+  // Look for the string `"clientExtensions":{"txAuthSimple":` to get the transaction text
+  const char *txAuthSimple_search_text = "\"clientExtensions\":{\"txAuthSimple\":";
+  char *auth_text_start = strstr((const char*)client_data_json, txAuthSimple_search_text);
+  
+  // This must be a regular authentication event, simply sign
+  if (auth_text_start == NULL) {
+    return sign_data(data, data_size, ret_signature);
+  }
+
+  // Skip forward the search text in the authentication text start
+  auth_text_start += strlen(txAuthSimple_search_text);
+
+  // Look for the end of the authentication text
+  char *auth_text_end = strstr(auth_text_start, "}");
+
+  // Expect a closing bracket
+  if (auth_text_end == NULL) {
+    return SGX_ERROR_UNEXPECTED;
+  }
+
+  // Mark the end of the authentication text before printing it
+  *auth_text_end = 0;
+
+  printf("Authentication text: %s\n", auth_text_start);
+
+  // TODO: Ask for user input
+
+  return sign_data(data, data_size, ret_signature);
 }

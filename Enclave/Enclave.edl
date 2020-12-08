@@ -38,6 +38,9 @@ enclave {
     trusted {
         public sgx_status_t get_public_key([out]sgx_ec256_public_t *ret_pk);
         public sgx_status_t sign_data([in, count=data_size]const uint8_t *data, uint32_t data_size, [out]sgx_ec256_signature_t *ret_signature);
+        public sgx_status_t webauthn_get_signature([in, count=data_size]const uint8_t *data, uint32_t data_size,
+                                                   [in, count=client_data_size]const uint8_t *client_data, uint32_t client_data_size,
+                                                   [out]sgx_ec256_signature_t *ret_signature);
     };
 
     // Define OCALLS
